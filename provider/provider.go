@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"regexp"
 	"sort"
 	"strconv"
@@ -72,6 +73,17 @@ func New(ctx context.Context, config *Config, name string) (*Provider, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid parser config: %w", err)
 	}
+
+	// Set up structured logger
+	logLevel := slog.LevelInfo
+	switch strings.ToLower(config.ApiLogging) {
+	case "debug":
+		logLevel = slog.LevelDebug
+	case "error":
+		logLevel = slog.LevelError
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(log.Writer(), &slog.HandlerOptions{Level: logLevel})))
+
 	client := newClient(pc)
 
 	if err := logVersion(client, ctx); err != nil {
@@ -98,7 +110,7 @@ func (p *Provider) Provide(cfgChan chan<- json.Marshaler) error {
 	go func() {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Printf("Recovered from panic in provider: %v", err)
+				slog.Error("Recovered from panic in provider", "error", err)
 			}
 		}()
 
@@ -114,14 +126,14 @@ func (p *Provider) loadConfiguration(ctx context.Context, cfgChan chan<- json.Ma
 
 	// Initial configuration
 	if err := p.updateConfiguration(ctx, cfgChan); err != nil {
-		log.Printf("Error during initial configuration: %v", err)
+		slog.Error("Error during initial configuration", "error", err)
 	}
 
 	for {
 		select {
 		case <-ticker.C:
 			if err := p.updateConfiguration(ctx, cfgChan); err != nil {
-				log.Printf("Error updating configuration: %v", err)
+				slog.Error("Error updating configuration", "error", err)
 			}
 		case <-ctx.Done():
 			return
@@ -179,7 +191,7 @@ func logVersion(client *internal.ProxmoxClient, ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("Connected to Proxmox VE version %s", version.Release)
+	slog.Info("Connected to Proxmox VE", "version", version.Release)
 	return nil
 }
 
@@ -194,7 +206,7 @@ func getServiceMap(client *internal.ProxmoxClient, ctx context.Context) (map[str
 	for _, nodeStatus := range nodes {
 		services, err := scanServices(client, ctx, nodeStatus.Node)
 		if err != nil {
-			log.Printf("Error scanning services on node %s: %v", nodeStatus.Node, err)
+			slog.Error("Error scanning services on node", "node", nodeStatus.Node, "error", err)
 			continue
 		}
 		servicesMap[nodeStatus.Node] = services
@@ -207,13 +219,13 @@ func getIPsOfService(client *internal.ProxmoxClient, ctx context.Context, nodeNa
 	if isContainer {
 		agentInterfaces, err = client.GetContainerNetworkInterfaces(ctx, nodeName, vmID)
 		if err != nil {
-			log.Printf("ERROR: Error getting container network interfaces for %s/%d: %v", nodeName, vmID, err)
+			slog.Error("Error getting container network interfaces", "node", nodeName, "vmID", vmID, "error", err)
 			return nil, fmt.Errorf("error getting container network interfaces: %w", err)
 		}
 	} else {
 		agentInterfaces, err = client.GetVMNetworkInterfaces(ctx, nodeName, vmID)
 		if err != nil {
-			log.Printf("ERROR: Error getting VM network interfaces for %s/%d: %v", nodeName, vmID, err)
+			slog.Error("Error getting VM network interfaces", "node", nodeName, "vmID", vmID, "error", err)
 			return nil, fmt.Errorf("error getting VM network interfaces: %w", err)
 		}
 	}
@@ -227,8 +239,8 @@ func getIPsOfService(client *internal.ProxmoxClient, ctx context.Context, nodeNa
 		}
 	}
 
-	if len(filteredIPs) == 0 && client.LogLevel == internal.LogLevelDebug {
-		log.Printf("ERROR: No valid IPs found for %s/%d (isContainer: %t). Raw IPs were: %+v", nodeName, vmID, isContainer, rawIPs)
+	if len(filteredIPs) == 0 {
+		slog.Debug("No valid IPs found", "node", nodeName, "vmID", vmID, "isContainer", isContainer, "rawIPs", rawIPs)
 	}
 
 	return filteredIPs, nil
@@ -242,21 +254,17 @@ func scanServices(client *internal.ProxmoxClient, ctx context.Context, nodeName 
 	}
 
 	for _, vm := range vms {
-		if client.LogLevel == "debug" {
-			log.Printf("DEBUG: Scanning VM %s/%s (%d): %s", nodeName, vm.Name, vm.VMID, vm.Status)
-		}
+		slog.Debug("Scanning VM", "node", nodeName, "name", vm.Name, "vmID", vm.VMID, "status", vm.Status)
 		
 		if vm.Status == "running" {
 			config, err := client.GetVMConfig(ctx, nodeName, vm.VMID)
 			if err != nil {
-				log.Printf("ERROR: Error getting VM config for %d: %v", vm.VMID, err)
+				slog.Error("Error getting VM config", "vmID", vm.VMID, "error", err)
 				continue
 			}
 			
 			traefikConfig := config.GetTraefikMap()
-			if client.LogLevel == "debug" {
-				log.Printf("VM %s (%d) traefik config: %v", vm.Name, vm.VMID, traefikConfig)
-			}
+			slog.Debug("VM traefik config", "name", vm.Name, "vmID", vm.VMID, "config", traefikConfig)
 			
 			service := internal.NewService(vm.VMID, vm.Name, traefikConfig)
 			
@@ -276,22 +284,18 @@ func scanServices(client *internal.ProxmoxClient, ctx context.Context, nodeName 
 	}
 
 	for _, ct := range cts {
-		if client.LogLevel == "debug" {
-			log.Printf("DEBUG: Scanning container %s/%s (%d): %s", nodeName, ct.Name, ct.VMID, ct.Status)
-		}
+		slog.Debug("Scanning container", "node", nodeName, "name", ct.Name, "vmID", ct.VMID, "status", ct.Status)
 			
 
 		if ct.Status == "running" {
 			config, err := client.GetContainerConfig(ctx, nodeName, ct.VMID)
 			if err != nil {
-				log.Printf("ERROR: Error getting container config for %d: %v", ct.VMID, err)
+				slog.Error("Error getting container config", "vmID", ct.VMID, "error", err)
 				continue
 			}
 
 			traefikConfig := config.GetTraefikMap()
-			if client.LogLevel == "debug" {
-				log.Printf("DEBUG: Container %s (%d) traefik config: %v", ct.Name, ct.VMID, traefikConfig)
-			}
+			slog.Debug("Container traefik config", "name", ct.Name, "vmID", ct.VMID, "config", traefikConfig)
 
 			service := internal.NewService(ct.VMID, ct.Name, traefikConfig)
 
@@ -336,7 +340,7 @@ func generateConfiguration(servicesMap map[string][]internal.Service) *dynamic.C
 		for _, service := range services {
 			// Skip disabled services
 			if len(service.Config) == 0 || !isBoolLabelEnabled(service.Config, "traefik.enable") {
-				log.Printf("Skipping service %s (ID: %d) because traefik.enable is not true", service.Name, service.ID)
+				slog.Info("Skipping service because traefik.enable is not true", "name", service.Name, "id", service.ID)
 				continue
 			}
 			
@@ -421,7 +425,7 @@ func generateConfiguration(servicesMap map[string][]internal.Service) *dynamic.C
 				config.HTTP.Routers[routerName] = router
 			}
 			
-			log.Printf("Created router and service for %s (ID: %d)", service.Name, service.ID)
+			slog.Info("Created router and service", "name", service.Name, "id", service.ID)
 		}
 	}
 	
@@ -631,7 +635,7 @@ func getServiceURL(service internal.Service, serviceName string, nodeName string
 	
 	// Fall back to hostname
 	url := fmt.Sprintf("%s://%s.%s:%s", protocol, service.Name, nodeName, port)
-	log.Printf("No IPs found, using hostname URL %s for service %s (ID: %d)", url, service.Name, service.ID)
+	slog.Info("No IPs found, using hostname URL", "url", url, "name", service.Name, "id", service.ID)
 	return url
 }
 
