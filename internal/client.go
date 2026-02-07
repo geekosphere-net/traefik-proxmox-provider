@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv" // Added import
 	"time"
@@ -41,9 +41,7 @@ func NewProxmoxClient(apiEndpoint, tokenID, token string, validateSSL bool, logL
 	}
 
 	baseURL := fmt.Sprintf("%s/api2/json", apiEndpoint)
-	if logLevel == LogLevelDebug {
-		log.Printf("Creating new Proxmox client with base URL: %s", baseURL)
-	}
+	slog.Debug("Creating new Proxmox client", "baseURL", baseURL)
 
 	return &ProxmoxClient{
 		BaseURL:     baseURL,
@@ -59,9 +57,7 @@ func NewProxmoxClient(apiEndpoint, tokenID, token string, validateSSL bool, logL
 func (c *ProxmoxClient) Do(ctx context.Context, method, path string, body interface{}, result interface{}) error {
 	fullURL := c.BaseURL + path
 
-	if c.LogLevel == LogLevelDebug {
-		log.Printf("API Request: %s %s", method, fullURL)
-	}
+	slog.Debug("API Request", "method", method, "url", fullURL)
 
 	var reqBody io.Reader
 	if body != nil {
@@ -101,9 +97,7 @@ func (c *ProxmoxClient) Do(ctx context.Context, method, path string, body interf
 			return fmt.Errorf("failed to read response body: %w", err)
 		}
 
-		if c.LogLevel == LogLevelDebug {
-			log.Printf("API Response: %s", string(respBody))
-		}
+		slog.Debug("API Response", "body", string(respBody))
 
 		err = json.Unmarshal(respBody, result)
 		if err != nil {
@@ -236,9 +230,7 @@ func (c *ProxmoxClient) GetContainerNetworkInterfaces(ctx context.Context, nodeN
 			prefixUint, err := strconv.ParseUint(ip.Prefix.String(), 10, 64) // Changed to use strconv.ParseUint
 			if err != nil {
 				// Log error but continue, as some IPs might be valid
-				if c.LogLevel == LogLevelDebug {
-					log.Printf("DEBUG: Failed to parse prefix string '%s' to uint64 for IP %s: %v", ip.Prefix.String(), ip.Address, err)
-				}
+				slog.Debug("Failed to parse prefix string to uint64", "prefix", ip.Prefix.String(), "ip", ip.Address, "error", err)
 				continue
 			}
 			ips = append(ips, IP{
