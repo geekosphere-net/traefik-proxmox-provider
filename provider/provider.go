@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"log/slog"
-	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -76,10 +76,13 @@ func New(ctx context.Context, config *Config, name string) (*Provider, error) {
 
 	// Set up structured logger
 	logLevel := slog.LevelInfo
-	if strings.EqualFold(config.ApiLogging, "debug") {
+	switch strings.ToLower(config.ApiLogging) {
+	case "debug":
 		logLevel = slog.LevelDebug
+	case "error":
+		logLevel = slog.LevelError
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})))
+	slog.SetDefault(slog.New(slog.NewTextHandler(log.Writer(), &slog.HandlerOptions{Level: logLevel})))
 
 	client := newClient(pc)
 
