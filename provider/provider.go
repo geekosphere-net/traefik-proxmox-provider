@@ -76,10 +76,10 @@ func New(ctx context.Context, config *Config, name string) (*Provider, error) {
 
 	// Set up structured logger
 	logLevel := slog.LevelInfo
-	if config.ApiLogging == "debug" {
+	if strings.EqualFold(config.ApiLogging, "debug") {
 		logLevel = slog.LevelDebug
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})))
 
 	client := newClient(pc)
 
