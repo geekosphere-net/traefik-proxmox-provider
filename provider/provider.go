@@ -79,6 +79,8 @@ func New(ctx context.Context, config *Config, name string) (*Provider, error) {
 	switch strings.ToLower(config.ApiLogging) {
 	case "debug":
 		logLevel = slog.LevelDebug
+	case "info":
+		logLevel = slog.LevelInfo
 	case "error":
 		logLevel = slog.LevelError
 	}
@@ -344,10 +346,11 @@ func generateConfiguration(servicesMap map[string][]internal.Service) *dynamic.C
 				continue
 			}
 			
-			// Extract router and service names from labels
+			// Extract router, service, and middleware names from labels
 			routerPrefixMap := make(map[string]bool)
 			servicePrefixMap := make(map[string]bool)
-			
+			middlewarePrefixMap := make(map[string]string) // name -> type
+
 			for k := range service.Config {
 				if strings.HasPrefix(k, "traefik.http.routers.") {
 					parts := strings.Split(k, ".")
@@ -359,6 +362,12 @@ func generateConfiguration(servicesMap map[string][]internal.Service) *dynamic.C
 					parts := strings.Split(k, ".")
 					if len(parts) > 3 {
 						servicePrefixMap[parts[3]] = true
+					}
+				}
+				if strings.HasPrefix(k, "traefik.http.middlewares.") {
+					parts := strings.Split(k, ".")
+					if len(parts) >= 5 {
+						middlewarePrefixMap[parts[3]] = parts[4]
 					}
 				}
 			}
@@ -425,6 +434,17 @@ func generateConfiguration(servicesMap map[string][]internal.Service) *dynamic.C
 				config.HTTP.Routers[routerName] = router
 			}
 			
+			// Create middlewares
+			for mwName, mwType := range middlewarePrefixMap {
+				mw, err := buildMiddleware(mwType, service.Config, mwName)
+				if err != nil {
+					slog.Error("Failed to build middleware", "name", mwName, "type", mwType, "error", err)
+					continue
+				}
+				config.HTTP.Middlewares[mwName] = mw
+				slog.Info("Created middleware", "name", mwName, "type", mwType)
+			}
+
 			slog.Info("Created router and service", "name", service.Name, "id", service.ID)
 		}
 	}
