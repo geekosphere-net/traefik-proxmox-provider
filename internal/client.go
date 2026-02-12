@@ -191,6 +191,30 @@ func (c *ProxmoxClient) GetContainerConfig(ctx context.Context, nodeName string,
 	return &response.Data, nil
 }
 
+// GetNodeConfig retrieves the configuration of a node
+func (c *ProxmoxClient) GetNodeConfig(ctx context.Context, nodeName string) (*ParsedConfig, error) {
+	var response struct {
+		Data ParsedConfig `json:"data"`
+	}
+	err := c.Get(ctx, fmt.Sprintf("/nodes/%s/config", nodeName), &response)
+	if err != nil {
+		return nil, err
+	}
+	return &response.Data, nil
+}
+
+// GetNodeNetworkInterfaces retrieves network interfaces from a node
+func (c *ProxmoxClient) GetNodeNetworkInterfaces(ctx context.Context, nodeName string) ([]NodeNetworkInterface, error) {
+	var response struct {
+		Data []NodeNetworkInterface `json:"data"`
+	}
+	err := c.Get(ctx, fmt.Sprintf("/nodes/%s/network", nodeName), &response)
+	if err != nil {
+		return nil, err
+	}
+	return response.Data, nil
+}
+
 // GetVMNetworkInterfaces retrieves network interfaces from a VM using the QEMU guest agent
 func (c *ProxmoxClient) GetVMNetworkInterfaces(ctx context.Context, nodeName string, vmID uint64) (*ParsedAgentInterfaces, error) {
 	var response struct {

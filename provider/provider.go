@@ -197,6 +197,15 @@ func getServiceMap(client *internal.ProxmoxClient, ctx context.Context) (map[str
 			log.Printf("Error scanning services on node %s: %v", nodeStatus.Node, err)
 			continue
 		}
+
+		// Scan the node itself for traefik labels
+		nodeService, err := scanNodeService(client, ctx, nodeStatus.Node)
+		if err != nil {
+			log.Printf("Error scanning node config for %s: %v", nodeStatus.Node, err)
+		} else if nodeService != nil {
+			services = append(services, *nodeService)
+		}
+
 		servicesMap[nodeStatus.Node] = services
 	}
 	return servicesMap, nil
@@ -306,6 +315,52 @@ func scanServices(client *internal.ProxmoxClient, ctx context.Context, nodeName 
 	}
 
 	return services, nil
+}
+
+func getNodeIPs(client *internal.ProxmoxClient, ctx context.Context, nodeName string) ([]internal.IP, error) {
+	interfaces, err := client.GetNodeNetworkInterfaces(ctx, nodeName)
+	if err != nil {
+		return nil, fmt.Errorf("error getting node network interfaces for %s: %w", nodeName, err)
+	}
+
+	ips := make([]internal.IP, 0)
+	for _, iface := range interfaces {
+		if iface.Active != 1 || iface.Iface == "lo" || iface.Address == "" {
+			continue
+		}
+		ips = append(ips, internal.IP{
+			Address:     iface.Address,
+			AddressType: "ipv4",
+		})
+	}
+	return ips, nil
+}
+
+func scanNodeService(client *internal.ProxmoxClient, ctx context.Context, nodeName string) (*internal.Service, error) {
+	config, err := client.GetNodeConfig(ctx, nodeName)
+	if err != nil {
+		return nil, fmt.Errorf("error getting node config for %s: %w", nodeName, err)
+	}
+
+	traefikConfig := config.GetTraefikMap()
+	if len(traefikConfig) == 0 {
+		return nil, nil
+	}
+
+	if client.LogLevel == "debug" {
+		log.Printf("DEBUG: Node %s traefik config: %v", nodeName, traefikConfig)
+	}
+
+	service := internal.NewService(0, nodeName, traefikConfig)
+
+	ips, err := getNodeIPs(client, ctx, nodeName)
+	if err != nil {
+		log.Printf("Error getting node IPs for %s: %v", nodeName, err)
+	} else {
+		service.IPs = ips
+	}
+
+	return &service, nil
 }
 
 func generateConfiguration(servicesMap map[string][]internal.Service) *dynamic.Configuration {

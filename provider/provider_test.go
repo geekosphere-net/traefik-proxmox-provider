@@ -328,6 +328,164 @@ func TestGetServiceURL(t *testing.T) {
 	}
 }
 
+func TestGenerateConfiguration_NodeWithExplicitNames(t *testing.T) {
+	servicesMap := map[string][]internal.Service{
+		"pve1": {
+			{
+				ID:   0,
+				Name: "pve1",
+				IPs:  []internal.IP{{Address: "192.168.1.10", AddressType: "ipv4"}},
+				Config: map[string]string{
+					"traefik.enable":                                                   "true",
+					"traefik.http.routers.proxmox-ui.rule":                             "Host(`proxmox.example.com`)",
+					"traefik.http.routers.proxmox-ui.entrypoints":                      "websecure",
+					"traefik.http.routers.proxmox-ui.tls.certresolver":                 "letsencrypt",
+					"traefik.http.services.proxmox-ui.loadbalancer.server.port":        "8006",
+					"traefik.http.services.proxmox-ui.loadbalancer.server.scheme":      "https",
+				},
+			},
+		},
+	}
+
+	config := generateConfiguration(servicesMap)
+
+	// Check router was created
+	router, exists := config.HTTP.Routers["proxmox-ui"]
+	if !exists {
+		t.Fatal("Expected router 'proxmox-ui' to exist")
+	}
+	if router.Rule != "Host(`proxmox.example.com`)" {
+		t.Errorf("Expected rule Host(`proxmox.example.com`), got %s", router.Rule)
+	}
+	if router.Service != "proxmox-ui" {
+		t.Errorf("Expected service 'proxmox-ui', got %s", router.Service)
+	}
+
+	// Check service was created
+	svc, exists := config.HTTP.Services["proxmox-ui"]
+	if !exists {
+		t.Fatal("Expected service 'proxmox-ui' to exist")
+	}
+	if len(svc.LoadBalancer.Servers) != 1 {
+		t.Fatalf("Expected 1 server, got %d", len(svc.LoadBalancer.Servers))
+	}
+	if svc.LoadBalancer.Servers[0].URL != "https://192.168.1.10:8006" {
+		t.Errorf("Expected URL https://192.168.1.10:8006, got %s", svc.LoadBalancer.Servers[0].URL)
+	}
+}
+
+func TestGenerateConfiguration_NodeWithDefaultNaming(t *testing.T) {
+	servicesMap := map[string][]internal.Service{
+		"pve1": {
+			{
+				ID:   0,
+				Name: "pve1",
+				IPs:  []internal.IP{{Address: "10.0.0.1", AddressType: "ipv4"}},
+				Config: map[string]string{
+					"traefik.enable": "true",
+				},
+			},
+		},
+	}
+
+	config := generateConfiguration(servicesMap)
+
+	// Default ID should be "pve1-0"
+	_, routerExists := config.HTTP.Routers["pve1-0"]
+	if !routerExists {
+		t.Fatal("Expected router 'pve1-0' to exist")
+	}
+
+	_, svcExists := config.HTTP.Services["pve1-0"]
+	if !svcExists {
+		t.Fatal("Expected service 'pve1-0' to exist")
+	}
+}
+
+func TestGenerateConfiguration_NodeSkippedWithoutEnable(t *testing.T) {
+	servicesMap := map[string][]internal.Service{
+		"pve1": {
+			{
+				ID:   0,
+				Name: "pve1",
+				IPs:  []internal.IP{{Address: "10.0.0.1", AddressType: "ipv4"}},
+				Config: map[string]string{
+					"traefik.http.routers.test.rule": "Host(`test.example.com`)",
+				},
+			},
+		},
+	}
+
+	config := generateConfiguration(servicesMap)
+
+	if len(config.HTTP.Routers) != 0 {
+		t.Errorf("Expected no routers, got %d", len(config.HTTP.Routers))
+	}
+	if len(config.HTTP.Services) != 0 {
+		t.Errorf("Expected no services, got %d", len(config.HTTP.Services))
+	}
+}
+
+func TestGenerateConfiguration_NodeAndVMCoexist(t *testing.T) {
+	servicesMap := map[string][]internal.Service{
+		"pve1": {
+			// VM service
+			{
+				ID:   100,
+				Name: "webserver",
+				IPs:  []internal.IP{{Address: "192.168.1.50", AddressType: "ipv4"}},
+				Config: map[string]string{
+					"traefik.enable":                                              "true",
+					"traefik.http.routers.web.rule":                               "Host(`web.example.com`)",
+					"traefik.http.services.web.loadbalancer.server.port":          "80",
+				},
+			},
+			// Node service
+			{
+				ID:   0,
+				Name: "pve1",
+				IPs:  []internal.IP{{Address: "192.168.1.10", AddressType: "ipv4"}},
+				Config: map[string]string{
+					"traefik.enable":                                                   "true",
+					"traefik.http.routers.proxmox.rule":                                "Host(`proxmox.example.com`)",
+					"traefik.http.services.proxmox.loadbalancer.server.port":           "8006",
+					"traefik.http.services.proxmox.loadbalancer.server.scheme":         "https",
+				},
+			},
+		},
+	}
+
+	config := generateConfiguration(servicesMap)
+
+	// Check VM router
+	if _, exists := config.HTTP.Routers["web"]; !exists {
+		t.Error("Expected router 'web' to exist")
+	}
+
+	// Check node router
+	if _, exists := config.HTTP.Routers["proxmox"]; !exists {
+		t.Error("Expected router 'proxmox' to exist")
+	}
+
+	// Check VM service
+	webSvc, exists := config.HTTP.Services["web"]
+	if !exists {
+		t.Fatal("Expected service 'web' to exist")
+	}
+	if webSvc.LoadBalancer.Servers[0].URL != "http://192.168.1.50:80" {
+		t.Errorf("Expected URL http://192.168.1.50:80, got %s", webSvc.LoadBalancer.Servers[0].URL)
+	}
+
+	// Check node service
+	proxmoxSvc, exists := config.HTTP.Services["proxmox"]
+	if !exists {
+		t.Fatal("Expected service 'proxmox' to exist")
+	}
+	if proxmoxSvc.LoadBalancer.Servers[0].URL != "https://192.168.1.10:8006" {
+		t.Errorf("Expected URL https://192.168.1.10:8006, got %s", proxmoxSvc.LoadBalancer.Servers[0].URL)
+	}
+}
+
 func TestHandleRouterTLS_ArrayDomains(t *testing.T) {
 	tests := []struct {
 		name           string

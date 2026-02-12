@@ -18,6 +18,15 @@ type NodeStatus struct {
 	Node string `json:"node"`
 }
 
+type NodeNetworkInterface struct {
+	Iface   string `json:"iface"`
+	Type    string `json:"type"`
+	Active  int    `json:"active"`
+	Address string `json:"address"`
+	Netmask string `json:"netmask"`
+	CIDR    string `json:"cidr"`
+}
+
 type VirtualMachine struct {
 	VMID   uint64 `json:"vmid"`
 	Name   string `json:"name"`

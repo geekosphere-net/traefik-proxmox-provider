@@ -176,6 +176,27 @@ func TestParsedConfig_GetTraefikMap_CaseInsensitive(t *testing.T) {
 	}
 }
 
+func TestNodeNetworkInterface(t *testing.T) {
+	iface := NodeNetworkInterface{
+		Iface:   "vmbr0",
+		Type:    "bridge",
+		Active:  1,
+		Address: "192.168.1.100",
+		Netmask: "255.255.255.0",
+		CIDR:    "192.168.1.100/24",
+	}
+
+	if iface.Iface != "vmbr0" {
+		t.Errorf("Expected iface vmbr0, got %s", iface.Iface)
+	}
+	if iface.Active != 1 {
+		t.Errorf("Expected active 1, got %d", iface.Active)
+	}
+	if iface.Address != "192.168.1.100" {
+		t.Errorf("Expected address 192.168.1.100, got %s", iface.Address)
+	}
+}
+
 func TestParsedAgentInterfaces_GetIPs(t *testing.T) {
 	pai := ParsedAgentInterfaces{
 		Result: []struct {
